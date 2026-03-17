@@ -21,6 +21,15 @@ class TypeThis extends StatefulWidget {
   /// The text which will be animated.
   final String string;
 
+  /// List of [TextSpan]s used to render rich text content.
+  ///
+  /// When non-null and not empty, the text for the typing animation will be
+  /// derived from these spans instead of [string] and [richTextMatchers].
+  ///
+  /// Only the `text` and `style` fields of the provided [TextSpan]s are
+  /// considered by this widget.
+  final List<TextSpan>? richTextSpans;
+
   /// Speed in milliseconds at which the typing animation will be executed.
   ///
   /// Default value is 50. That means each character in the [string] will render
@@ -174,6 +183,7 @@ class TypeThis extends StatefulWidget {
   const TypeThis({
     super.key,
     required this.string,
+    this.richTextSpans,
     this.speed = 50,
     this.showBlinkingCursor = true,
     this.controller,
@@ -216,38 +226,56 @@ class _TypeThisState extends State<TypeThis> {
   int currentStep = 0;
 
   late Timer timer;
+  late String _fullText;
 
   @override
   void initState() {
     super.initState();
-    final matchers = widget.richTextMatchers;
-
-    final patternsList = matchers.map((matcher) => matcher.regexPattern);
-    final pattern = patternsList.isNotEmpty ? patternsList.join('|') : '(?!.*)';
-
-    widget.string.splitMapJoin(
-      RegExp(pattern),
-      onMatch: (Match match) {
-        final matchData = match[0];
-        final matcherToConsider = matchers.firstWhere(
-          (matcher) => RegExp(matcher.regexPattern).hasMatch(matchData ?? ''),
-        );
-
-        if (matchData != null) {
-          richTextMappers.add(<String, TextStyle?>{
-            matchData: matcherToConsider.style ?? widget.style,
-          });
+    if (widget.richTextSpans != null && widget.richTextSpans!.isNotEmpty) {
+      for (final span in widget.richTextSpans!) {
+        if (span.text == null || span.text!.isEmpty) {
+          continue;
         }
-
-        return '';
-      },
-      onNonMatch: (String nonMatch) {
         richTextMappers.add(<String, TextStyle?>{
-          nonMatch: widget.style,
+          span.text!: span.style ?? widget.style,
         });
-        return '';
-      },
-    );
+      }
+
+      _fullText = richTextMappers.map((entry) => entry.keys.first).join();
+    } else {
+      final matchers = widget.richTextMatchers;
+
+      final patternsList = matchers.map((matcher) => matcher.regexPattern);
+      final pattern =
+          patternsList.isNotEmpty ? patternsList.join('|') : '(?!.*)';
+
+      widget.string.splitMapJoin(
+        RegExp(pattern),
+        onMatch: (Match match) {
+          final matchData = match[0];
+          final matcherToConsider = matchers.firstWhere(
+            (matcher) =>
+                RegExp(matcher.regexPattern).hasMatch(matchData ?? ''),
+          );
+
+          if (matchData != null) {
+            richTextMappers.add(<String, TextStyle?>{
+              matchData: matcherToConsider.style ?? widget.style,
+            });
+          }
+
+          return '';
+        },
+        onNonMatch: (String nonMatch) {
+          richTextMappers.add(<String, TextStyle?>{
+            nonMatch: widget.style,
+          });
+          return '';
+        },
+      );
+
+      _fullText = widget.string;
+    }
 
     _startTimerAndUpdateState();
     widget.controller?.addListener(_handleControllerChange);
@@ -268,7 +296,7 @@ class _TypeThisState extends State<TypeThis> {
       timer.cancel();
     } else if (widget.controller?.state == TypeThisControllerState.resumed) {
       timer.cancel();
-      if (currentStep != widget.string.characters.length) {
+      if (currentStep != _fullText.characters.length) {
         _startTimerAndUpdateState();
       }
     }
@@ -277,7 +305,7 @@ class _TypeThisState extends State<TypeThis> {
   void _startTimerAndUpdateState() {
     timer = Timer.periodic(Duration(milliseconds: widget.speed), (_) {
       currentStep++;
-      if (currentStep == widget.string.characters.length) {
+      if (currentStep == _fullText.characters.length) {
         timer.cancel();
       }
       if (mounted) {
